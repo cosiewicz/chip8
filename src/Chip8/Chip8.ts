@@ -7,10 +7,9 @@ export class Chip8 {
     private display: Display;
 
 
-    constructor() {
-        this.display = new Display();
+    constructor(ctx: CanvasRenderingContext2D) {
+        this.display = new Display(ctx);
         this.cpu = new Cpu(this.display);
-        this.display = new Display();
     }
 
 
@@ -18,11 +17,11 @@ export class Chip8 {
         this.cpu.run(delay)
     }
 
-    public pause(){
+    public pause() {
         this.cpu.pause();
     }
 
-    public async loadGame(file:string){
+    public async loadGame(file: string) {
         const response = await fetch('games/' + file);
         const buffer = await response.arrayBuffer();
         this.cpu.memory.set(new Uint8Array(buffer), Cpu.MEMORY_PROG_START);

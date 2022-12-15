@@ -50,9 +50,7 @@ export class Cpu {
         this.runIsPaused = false;
         this.display = display;
         this.key = {keypress: null}
-
     }
-
 
     get cp(): number {
         return this._cp;
@@ -61,7 +59,6 @@ export class Cpu {
     set cp(value: number) {
         this._cp = value;
     }
-
 
     public getNNN(instruction: number): number {
         return (instruction & 0x0FFF);
@@ -104,21 +101,19 @@ export class Cpu {
             throw Error("first stack is undefined");
         }
         this._cp = unstackPointer + 2;
-        this.next();
         console.log("RET " + unstackPointer.toString(16));
     }
 
     public _1NNN() {
-
         this._cp = this.getNNN(this.getMemory());
-        this.next();
         console.log("JP " + this._cp.toString(16))
     }
 
     public _2NNN() {
         this.stack.push(this._cp);
+        console.log("ADD STACK " + this._cp.toString(10))
         this._cp = this.getNNN(this.getMemory());
-        console.log("CALL " + this._cp.toString(16))
+        console.log("CALL " + this._cp.toString(10))
     }
 
     public _3XKK() {
@@ -126,7 +121,7 @@ export class Cpu {
         const x = this.getX(instruction);
         const kk = this.getKK(instruction);
         if (this.registerV[x] === kk) {
-            this._cp += 2;
+            this.next();
         }
         this.next();
         console.log("SE " + x.toString(16) + " , " + kk.toString(16))
@@ -137,10 +132,10 @@ export class Cpu {
         const x = this.getX(instruction);
         const kk = this.getKK(instruction);
         if (this.registerV[x] !== kk) {
-            this._cp += 2;
+            this.next();
         }
         this.next();
-        console.log("NSE " + x.toString(16) + " , " + kk.toString(16))
+        console.log("SNE " + x.toString(16) + " , " + kk.toString(16))
     }
 
     public _5XY0() {
@@ -148,7 +143,7 @@ export class Cpu {
         const x = this.getX(instruction);
         const y = this.getY(instruction);
         if (this.registerV[x] === this.registerV[y]) {
-            this._cp += 2;
+            this.next();
         }
         this.next();
         console.log("SE " + x.toString(16) + " , " + y.toString(16))
@@ -185,7 +180,7 @@ export class Cpu {
         const instruction = this.getMemory();
         const x = this.getX(instruction);
         const y = this.getY(instruction);
-        this.registerV[x] = this.registerV[x] | this.registerV[y];
+        this.registerV[x] = (this.registerV[x] | this.registerV[y]);
         this.next();
         console.log("OR  " + x.toString(16) + " , " + y.toString(16))
     }
@@ -194,7 +189,7 @@ export class Cpu {
         const instruction = this.getMemory();
         const x = this.getX(instruction);
         const y = this.getY(instruction);
-        this.registerV[x] = this.registerV[x] & this.registerV[y];
+        this.registerV[x] = (this.registerV[x] & this.registerV[y]);
         this.next();
         console.log("AND " + x.toString(16) + " , " + y.toString(16))
     }
@@ -203,7 +198,10 @@ export class Cpu {
         const instruction = this.getMemory();
         const x = this.getX(instruction);
         const y = this.getY(instruction);
-        this.registerV[x] = this.registerV[x] ^ this.registerV[y];
+        const xor = this.registerV[x] ^ this.registerV[y];
+        // this.registerV[x] =
+        this.registerVF = +(xor !== (this.registerV[x] | this.registerV[y]))
+        this.registerV[x] = xor;
         this.next();
         console.log("XOR " + x.toString(16) + " , " + y.toString(16))
     }
@@ -227,7 +225,7 @@ export class Cpu {
         const instruction = this.getMemory();
         const x = this.getX(instruction);
         const y = this.getY(instruction);
-        if (this.registerV[x] > this.registerV[y]) {
+        if (this.registerV[x] < this.registerV[y]) {
             this.registerVF = 1;
         } else {
             this.registerVF = 0;
@@ -241,11 +239,8 @@ export class Cpu {
         const instruction = this.getMemory();
         const x = this.getX(instruction);
 
-        if (this.registerV[x] >> 8 === 1) {
-            this.registerVF = 1;
-        } else {
-            this.registerVF = 0;
-        }
+        this.registerVF = this.registerV[x] & 0x1;
+
         this.registerV[x] >>= 1;
         this.next();
         console.log("SHR " + x.toString(16))
@@ -255,7 +250,7 @@ export class Cpu {
         const instruction = this.getMemory();
         const x = this.getX(instruction);
         const y = this.getY(instruction);
-        if (this.registerV[x] < this.registerV[y]) {
+        if (this.registerV[x] > this.registerV[y]) {
             this.registerVF = 1;
         } else {
             this.registerVF = 0;
@@ -265,15 +260,12 @@ export class Cpu {
         console.log("SUBN " + x.toString(16) + " , " + y.toString(16))
     }
 
-    public _8XY8() {
+    public _8XYE() {
         const instruction = this.getMemory();
         const x = this.getX(instruction);
 
-        if (this.registerV[x] >> 8 === 1) {
-            this.registerVF = 1;
-        } else {
-            this.registerVF = 0;
-        }
+        this.registerVF = this.registerV[x] & 0x80;
+
         this.registerV[x] <<= 1;
         this.next();
         console.log("SHL " + x.toString(16))
@@ -285,7 +277,7 @@ export class Cpu {
         const y = this.getY(instruction);
 
         if (this.registerV[x] !== this.registerV[y]) {
-            this._cp += 2;
+            this.next();
         }
         this.next();
         console.log("SNE " + x.toString(16) + " , " + y.toString(16))
@@ -300,7 +292,7 @@ export class Cpu {
 
     public _BNNN() {
         this._cp = this.getNNN(this.getMemory()) + this.registerV[0];
-        console.log("JP " + this.registerV[0].toString(16));
+        console.log("JP " + this._cp.toString(16));
     }
 
     public _CXKK() {
@@ -317,12 +309,9 @@ export class Cpu {
         const x = this.getX(instruction);
         const y = this.getY(instruction);
         const n = this.getN(instruction);
-        const sprites: number[] = [];
+        const sprite =  this._memory.slice(this.registerI,this.registerI+n);
 
-        for (let i = 0; i < n; i++) {
-            sprites.push(this._memory[this.registerI + i]);
-        }
-        this.registerVF = this.display.drawSprite(x, y, {data: sprites})
+        this.registerVF = this.display.drawSprite(this.registerV[x], this.registerV[y], {data: sprite})
         this.next();
         console.log("DRW " + x.toString(16) + " , " + y.toString(16), +" ", n)
     }
@@ -332,8 +321,9 @@ export class Cpu {
         const x = this.getX(instruction);
 
         if (x === this.key.keypress) {
-            this._cp += 2;
+            this.next();
         }
+        this.next();
         console.log("SKP  " + x.toString(16));
     }
 
@@ -342,29 +332,42 @@ export class Cpu {
         const x = this.getX(instruction);
 
         if (x !== this.key.keypress) {
-            this._cp += 2;
+             this.next();
         }
+        this.next();
         console.log("SKP  " + x.toString(16));
     }
 
     public _FX15() {
-        this.registerDT = this.getX(this.getMemory());
+        const x = this.getX(this.getMemory());
+        this.registerDT = this.registerV[x];
         this.next();
+        console.log("LD DT " + x.toString(16));
+    }
 
+    public _Fx07() {
+        const x = this.getX(this.getMemory());
+        this.registerV[x] = this.registerDT;
+        this.next();
     }
 
     public _FX18() {
-        this.registerST = this.getX(this.getMemory());
+        const x = this.getX(this.getMemory());
+        this.registerST = this.registerV[x];
         this.next();
+        console.log("LD ST " + x.toString(16));
     }
 
     public _FX1E() {
-        this.registerI += this.getX(this.getMemory());
+        const x = this.getX(this.getMemory());
+        this.registerI += this.registerV[x];
         this.next();
+        console.log("ADD I " + x.toString(16));
     }
 
     public _FX29() {
-        this.registerI = Cpu.MEMORY_INTERPRETER_START + (this.getX(this.getMemory()) * 5)
+        const x = (this.getX(this.getMemory()));
+        this.registerI = Cpu.MEMORY_INTERPRETER_START + this.registerV[x] * 5;
         this.next();
     }
 
@@ -429,13 +432,11 @@ export class Cpu {
 
     public static convertValueToBitsArray(value: number): number[] {
         let array: number[] = [];
-        let binary = 0;
-        while (value > 0) {
-            binary = (value % 2) + binary;
-            value = Math.floor(value / 2);
-            array.push(binary);
+        for (let i = 0; i < 8; i++) {
+            array.push(value >> i & 1);
+
         }
-        return array;
+        return array.reverse();
     }
 
 
@@ -447,21 +448,33 @@ export class Cpu {
             const f = memory >> 12;
             const _4bits = memory & 0xF;
             const _8bits = memory & 0xFF;
-            console.log(this.getMemory().toString(16) + " ");
-
+            this.display.draw();
+            console.log(memory.toString(16))
 
             switch (f) {
 
                 case 0x0:
                     switch (_4bits) {
+                        /*
+                            Clear the display.
+                        */
                         case 0x0:
                             this._00E0()
-                            break
+                            break;
+
+                        /*
+                            Return from a subroutine.
+                            The interpreter sets the program counter to the address at the top of the stack, then subtracts 1 from the stack pointer.
+                        */
                         case 0xE:
                             this._00EE()
                             break;
                     }
                     break;
+                /*
+                    Jump to location nnn.
+                    The interpreter sets the program counter to nnn.
+                 */
                 case 0x1:
                     this._1NNN();
                     break;
@@ -509,8 +522,8 @@ export class Cpu {
                         case 0x7:
                             this._8XY7()
                             break;
-                        case 0x8:
-                            this._8XY8();
+                        case 0xE:
+                            this._8XYE();
                             break;
                     }
                     break;
@@ -528,6 +541,7 @@ export class Cpu {
                     break;
                 case 0xD:
                     this._DXYN();
+                    break;
                 case 0xE:
                     switch (_4bits) {
                         case 0xE:
@@ -540,6 +554,9 @@ export class Cpu {
                     break;
                 case 0xF:
                     switch (_8bits) {
+                        case 0x07:
+                            this._Fx07();
+                            break;
                         case 0x15:
                             this._FX15()
                             break;
@@ -564,35 +581,6 @@ export class Cpu {
                     }
                     break;
             }
-
-
-            // this.functionTable.forEach((val) => {
-            //     if (val.addr === f) {
-            //         if (val.func) {
-            //             val.func();
-            //         } else {
-            //
-            //             val.child.forEach((val2) => {
-            //                 if (f === 0x8) {
-            //                     const last = memory & 0xF;
-            //                     if (val2.addr === last) {
-            //                         if (val2.func) {
-            //                             val2.func;
-            //                         }
-            //                     }
-            //
-            //                 } else {
-            //                     const last = memory & 0xFF;
-            //                     if (val2.addr === last) {
-            //                         if (val2.func) {
-            //                             val2.func;
-            //                         }
-            //                     }
-            //                 }
-            //             })
-            //         }
-            //     }
-            // })
 
             if (!this.runIsPaused) {
                 if (this.registerDT > 0) {
