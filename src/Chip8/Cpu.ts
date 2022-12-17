@@ -2,7 +2,7 @@ import {Display} from "./Display";
 
 
 export type Key = {
-    keypress: 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | undefined | null
+    keypress: number
 }
 
 export type FunctionChip8 = {
@@ -19,6 +19,7 @@ export class Cpu {
     public static readonly MEMORY_PRO_END = 0x5FFF;
     public static readonly MEMORY_INTERPRETER_START = 0x000;
     public static readonly MEMORY_INTERPRETER_END = 0x1FF;
+    public static readonly STEP = 10;
 
 
     public static readonly V_SIZE = 15;
@@ -28,13 +29,12 @@ export class Cpu {
     private registerI: number;
     private registerDT: number;
     private registerST: number;
-    private registerVF: number;
     private stack: number[];
     private _cp: number;
-    private runId: number;
+    private runId: NodeJS.Timer | undefined;
     private runIsPaused: boolean;
     private display: Display;
-    private key: Key;
+    private _key: Key;
 
     constructor(display: Display) {
         this._memory = new Uint8Array(Cpu.MEMORY_SIZE);
@@ -42,14 +42,20 @@ export class Cpu {
         this.registerI = 0;
         this.registerDT = 0;
         this.registerST = 0;
-        this.registerVF = 0;
         this._cp = 0;
         this.stack = [];
         this.initInterpreter();
-        this.runId = 0;
+
         this.runIsPaused = false;
         this.display = display;
-        this.key = {keypress: null}
+        this._key = {keypress: -1}
+
+        //this.memory[0x1ff] = 2;
+    }
+
+
+    set key(value: Key) {
+        this._key = value;
     }
 
     get cp(): number {
@@ -85,7 +91,7 @@ export class Cpu {
     }
 
     public next() {
-        this._cp += 2;
+        this._cp = (this._cp + 2) & 0x0FFF;
     }
 
     public _00E0() {
@@ -96,7 +102,7 @@ export class Cpu {
 
     public _00EE() {
 
-        const unstackPointer = this.stack.shift();
+        const unstackPointer = this.stack.pop();
         if (unstackPointer === undefined) {
             throw Error("first stack is undefined");
         }
@@ -162,7 +168,7 @@ export class Cpu {
         const instruction = this.getMemory();
         const x = this.getX(instruction);
         const kk = this.getKK(instruction);
-        this.registerV[x] += kk;
+        this.registerV[x] = this.registerV[x] + kk;
         this.next();
         console.log("ADD " + x.toString(16) + " , " + kk.toString(16))
     }
@@ -199,9 +205,9 @@ export class Cpu {
         const x = this.getX(instruction);
         const y = this.getY(instruction);
         const xor = this.registerV[x] ^ this.registerV[y];
-        // this.registerV[x] =
-        this.registerVF = +(xor !== (this.registerV[x] | this.registerV[y]))
+
         this.registerV[x] = xor;
+        this.registerV[0xF] = +(xor !== (this.registerV[x] | this.registerV[y]))
         this.next();
         console.log("XOR " + x.toString(16) + " , " + y.toString(16))
     }
@@ -211,12 +217,14 @@ export class Cpu {
         const x = this.getX(instruction);
         const y = this.getY(instruction);
         const add = this.registerV[x] + this.registerV[y];
-        if (add > 255) {
-            this.registerVF = 1;
-        } else {
-            this.registerVF = 0;
-        }
+
         this.registerV[x] = add & 0x00FF;
+
+        if (add > 255) {
+            this.registerV[0xF] = 1;
+        } else {
+            this.registerV[0xF] = 0;
+        }
         this.next();
         console.log("ADD " + x.toString(16) + " , " + y.toString(16))
     }
@@ -225,12 +233,17 @@ export class Cpu {
         const instruction = this.getMemory();
         const x = this.getX(instruction);
         const y = this.getY(instruction);
-        if (this.registerV[x] < this.registerV[y]) {
-            this.registerVF = 1;
-        } else {
-            this.registerVF = 0;
-        }
+
+        const oldVX = this.registerV[x];
+
         this.registerV[x] -= this.registerV[y];
+
+        if (oldVX > this.registerV[y]) {
+            this.registerV[0xF] = 1;
+        } else {
+            this.registerV[0xF] = 0;
+        }
+
         this.next();
         console.log("SUB " + x.toString(16) + " , " + y.toString(16))
     }
@@ -238,10 +251,10 @@ export class Cpu {
     public _8XY6() {
         const instruction = this.getMemory();
         const x = this.getX(instruction);
-
-        this.registerVF = this.registerV[x] & 0x1;
+        const oldX = this.registerV[x];
 
         this.registerV[x] >>= 1;
+        this.registerV[0xF] = oldX & 0x01;
         this.next();
         console.log("SHR " + x.toString(16))
     }
@@ -250,12 +263,16 @@ export class Cpu {
         const instruction = this.getMemory();
         const x = this.getX(instruction);
         const y = this.getY(instruction);
-        if (this.registerV[x] > this.registerV[y]) {
-            this.registerVF = 1;
-        } else {
-            this.registerVF = 0;
-        }
+        const oldX = this.registerV[x];
+
         this.registerV[x] = this.registerV[y] - this.registerV[x];
+
+        if (oldX < this.registerV[y]) {
+            this.registerV[0xF] = 1;
+        } else {
+            this.registerV[0xF] = 0;
+        }
+
         this.next();
         console.log("SUBN " + x.toString(16) + " , " + y.toString(16))
     }
@@ -263,10 +280,10 @@ export class Cpu {
     public _8XYE() {
         const instruction = this.getMemory();
         const x = this.getX(instruction);
-
-        this.registerVF = this.registerV[x] & 0x80;
+        const oldX = this.registerV[x];
 
         this.registerV[x] <<= 1;
+        this.registerV[0xF] = oldX & 0x80;
         this.next();
         console.log("SHL " + x.toString(16))
     }
@@ -309,10 +326,10 @@ export class Cpu {
         const x = this.getX(instruction);
         const y = this.getY(instruction);
         const n = this.getN(instruction);
-        const sprite =  this._memory.slice(this.registerI,this.registerI+n);
-
-        this.registerVF = this.display.drawSprite(this.registerV[x], this.registerV[y], {data: sprite})
+        const sprite = this._memory.slice(this.registerI, this.registerI + n);
+        this.registerV[0xF] = this.display.drawSprite(this.registerV[x], this.registerV[y], {data: sprite})
         this.next();
+
         console.log("DRW " + x.toString(16) + " , " + y.toString(16), +" ", n)
     }
 
@@ -320,7 +337,7 @@ export class Cpu {
         const instruction = this.getMemory();
         const x = this.getX(instruction);
 
-        if (x === this.key.keypress) {
+        if (this.registerV[x] === this._key.keypress) {
             this.next();
         }
         this.next();
@@ -330,12 +347,20 @@ export class Cpu {
     public _EXA1() {
         const instruction = this.getMemory();
         const x = this.getX(instruction);
-
-        if (x !== this.key.keypress) {
-             this.next();
+        if (this.registerV[x] !== this._key.keypress) {
+            this.next();
         }
         this.next();
         console.log("SKP  " + x.toString(16));
+    }
+
+    public _FX0A() {
+        const instruction = this.getMemory();
+        const x = this.getX(instruction);
+        if (this._key.keypress != -1) {
+            this.next();
+            this.registerV[x] = this._key.keypress;
+        }
     }
 
     public _FX15() {
@@ -358,6 +383,7 @@ export class Cpu {
         console.log("LD ST " + x.toString(16));
     }
 
+
     public _FX1E() {
         const x = this.getX(this.getMemory());
         this.registerI += this.registerV[x];
@@ -375,22 +401,18 @@ export class Cpu {
         const instruction = this.getMemory();
         const x = this.getX(instruction);
 
-        this._memory[this.registerI + 2] = this.registerV[x] % 10;
-        this.registerV[x] /= 10;
+        this.memory[this.registerI] = this.registerV[x] / 100, 10;
+        this.memory[this.registerI + 1] = this.registerV[x] % 100 / 10;
+        this.memory[this.registerI + 2] = this.registerV[x] % 10;
 
-        this._memory[this.registerI + 1] = this.registerV[x] % 10;
-        this.registerV[x] /= 10;
-
-        this._memory[this.registerI] = this.registerV[x] % 10;
         this.next();
     }
 
     public _FX55() {
         const instruction = this.getMemory();
         const x = this.getX(instruction);
-
         for (let i = 0; i <= x; i++) {
-            this.registerV[this.registerI + 1] = this._memory[this.registerI];
+            this._memory[this.registerI + i] = this.registerV[i];
         }
         this.next();
     }
@@ -400,7 +422,7 @@ export class Cpu {
         const x = this.getX(instruction);
 
         for (let i = 0; i <= x; i++) {
-            this.registerV[this.registerI] = this._memory[this.registerI + i];
+            this.registerV[i] = this._memory[this.registerI + i];
         }
         this.next();
     }
@@ -439,147 +461,154 @@ export class Cpu {
         return array.reverse();
     }
 
+    public decode(memory: number) {
+        const f = memory >> 12;
+        const _4bits = memory & 0xF;
+        const _8bits = memory & 0xFF;
+        console.log("OPCODE :" + memory.toString(16))
+
+        switch (f) {
+
+            case 0x0:
+                switch (_4bits) {
+                    /*
+                        Clear the display.
+                    */
+                    case 0x0:
+                        this._00E0()
+                        break;
+
+                    /*
+                        Return from a subroutine.
+                        The interpreter sets the program counter to the address at the top of the stack, then subtracts 1 from the stack pointer.
+                    */
+                    case 0xE:
+                        this._00EE()
+                        break;
+                }
+                break;
+            /*
+                Jump to location nnn.
+                The interpreter sets the program counter to nnn.
+             */
+            case 0x1:
+                this._1NNN();
+                break;
+            case 0x2:
+                this._2NNN();
+                break;
+            case 0x3:
+                this._3XKK();
+                break;
+            case 0x4:
+                this._4XKK();
+                break;
+            case 0x5:
+                this._5XY0()
+                break;
+            case 0x6:
+                this._6xKK()
+                break;
+            case 0x7:
+                this._7XKK();
+                break;
+            case 0x8:
+                switch (_4bits) {
+                    case 0x0:
+                        this._8XY0();
+                        break;
+                    case 0x1:
+                        this._8XY1();
+                        break;
+                    case 0x2:
+                        this._8XY2();
+                        break;
+                    case 0x3:
+                        this._8XY3();
+                        break;
+                    case 0x4:
+                        this._8XY4();
+                        break;
+                    case 0x5:
+                        this._8XY5();
+                        break;
+                    case 0x6:
+                        this._8XY6();
+                        break;
+                    case 0x7:
+                        this._8XY7()
+                        break;
+                    case 0xE:
+                        this._8XYE();
+                        break;
+                }
+                break;
+            case 0x9:
+                this._9XY0();
+                break;
+            case 0xA:
+                this._ANNN();
+                break;
+            case 0xB:
+                this._BNNN();
+                break;
+            case 0xC:
+                this._CXKK();
+                break;
+            case 0xD:
+                this._DXYN();
+                break;
+            case 0xE:
+                switch (_4bits) {
+                    case 0xE:
+                        this._EX9E();
+                        break;
+                    case 0x1:
+                        this._EXA1();
+                        break;
+                }
+                break;
+            case 0xF:
+                switch (_8bits) {
+                    case 0x07:
+                        this._Fx07();
+                        break;
+                    case 0x0A:
+                        this._FX0A();
+                        break;
+                    case 0x15:
+                        this._FX15()
+                        break;
+                    case 0x18:
+                        this._FX18();
+                        break;
+                    case 0x1E:
+                        this._FX1E();
+                        break;
+                    case 0x29:
+                        this._FX29();
+                        break;
+                    case 0x33:
+                        this._FX33();
+                        break;
+                    case 0x55:
+                        this._FX55();
+                        break;
+                    case 0x65:
+                        this._FX65();
+                        break;
+                }
+                break;
+        }
+    }
+
 
     public run(delay: number) {
         this.runId = setInterval(() => {
 
-            //console.log("cp : " + this._cp)
-            const memory = this.getMemory();
-            const f = memory >> 12;
-            const _4bits = memory & 0xF;
-            const _8bits = memory & 0xFF;
-            this.display.draw();
-            console.log(memory.toString(16))
-
-            switch (f) {
-
-                case 0x0:
-                    switch (_4bits) {
-                        /*
-                            Clear the display.
-                        */
-                        case 0x0:
-                            this._00E0()
-                            break;
-
-                        /*
-                            Return from a subroutine.
-                            The interpreter sets the program counter to the address at the top of the stack, then subtracts 1 from the stack pointer.
-                        */
-                        case 0xE:
-                            this._00EE()
-                            break;
-                    }
-                    break;
-                /*
-                    Jump to location nnn.
-                    The interpreter sets the program counter to nnn.
-                 */
-                case 0x1:
-                    this._1NNN();
-                    break;
-                case 0x2:
-                    this._2NNN();
-                    break;
-                case 0x3:
-                    this._3XKK();
-                    break;
-                case 0x4:
-                    this._4XKK();
-                    break;
-                case 0x5:
-                    this._5XY0()
-                    break;
-                case 0x6:
-                    this._6xKK()
-                    break;
-                case 0x7:
-                    this._7XKK();
-                    break;
-                case 0x8:
-                    switch (_4bits) {
-                        case 0x0:
-                            this._8XY0();
-                            break;
-                        case 0x1:
-                            this._8XY1();
-                            break;
-                        case 0x2:
-                            this._8XY2();
-                            break;
-                        case 0x3:
-                            this._8XY3();
-                            break;
-                        case 0x4:
-                            this._8XY4();
-                            break;
-                        case 0x5:
-                            this._8XY5();
-                            break;
-                        case 0x6:
-                            this._8XY6();
-                            break;
-                        case 0x7:
-                            this._8XY7()
-                            break;
-                        case 0xE:
-                            this._8XYE();
-                            break;
-                    }
-                    break;
-                case 0x9:
-                    this._9XY0();
-                    break;
-                case 0xA:
-                    this._ANNN();
-                    break;
-                case 0xB:
-                    this._BNNN();
-                    break;
-                case 0xC:
-                    this._CXKK();
-                    break;
-                case 0xD:
-                    this._DXYN();
-                    break;
-                case 0xE:
-                    switch (_4bits) {
-                        case 0xE:
-                            this._EX9E();
-                            break;
-                        case 0x1:
-                            this._EXA1();
-                            break;
-                    }
-                    break;
-                case 0xF:
-                    switch (_8bits) {
-                        case 0x07:
-                            this._Fx07();
-                            break;
-                        case 0x15:
-                            this._FX15()
-                            break;
-                        case 0x18:
-                            this._FX18();
-                            break;
-                        case 0x1E:
-                            this._FX1E();
-                            break;
-                        case 0x29:
-                            this._FX29();
-                            break;
-                        case 0x33:
-                            this._FX33();
-                            break;
-                        case 0x55:
-                            this._FX55();
-                            break;
-                        case 0x65:
-                            this._FX65();
-                            break;
-                    }
-                    break;
+            for (let i = 0; i < Cpu.STEP; i++) {
+                this.decode(this.getMemory());
+                this.display.draw();
             }
 
             if (!this.runIsPaused) {

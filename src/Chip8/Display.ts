@@ -47,21 +47,20 @@ export class Display {
 
         for (let posY = 0; posY < sprite.data.length; posY++) {
             let byte: number[] = Cpu.convertValueToBitsArray(sprite.data[posY]);
-            console.log(byte);
 
             for (let posX = 0; posX < byte.length; posX++) {
 
-                let b = byte[posX] === 1;
+                const b = byte[posX] === 1;
+                const current_pixel = this.screenArray[(posY + y) % Display.HEIGHT][(posX + x) % Display.WIDTH];
 
-                if (this.screenArray[(posY + y) % Display.HEIGHT][(posX + x) % Display.WIDTH] && b) {
-                    this.screenArray[(posY + y) % Display.HEIGHT][(posX + x) % Display.WIDTH] = false;
+                this.screenArray[(posY + y) % Display.HEIGHT][(posX + x) % Display.WIDTH] = (current_pixel || b) &&
+                    current_pixel !== b
+
+                if (current_pixel && b) {
                     flag = 1;
-                } else {
-                    this.screenArray[(posY + y) % Display.HEIGHT][(posX + x) % Display.WIDTH] = b;
                 }
             }
         }
         return flag;
     }
-
 }
